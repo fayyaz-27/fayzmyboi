@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESP32 Music Toy</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      min-height: 100vh;
+      color: #e0e0e0;
+      padding: 16px;
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 1.5em;
+      margin-bottom: 4px;
+      color: #fff;
+      text-shadow: 0 0 20px rgba(100,200,255,0.5);
+    }
+    .subtitle { text-align:center; color: #88aacc; font-size: 12px; margin-bottom: 16px; }
+
+    /* BLE status bar */
+    #ble-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      background: rgba(255,255,255,0.08);
+      border-radius: 10px; padding: 10px 14px; margin-bottom: 14px;
+      border: 1px solid rgba(255,255,255,0.12);
+    }
+    #ble-dot { width:10px; height:10px; border-radius:50%; background:#555; margin-right:8px; flex-shrink:0; }
+    #ble-dot.connected  { background:#4caf50; box-shadow:0 0 8px #4caf50; }
+    #ble-dot.connecting { background:#ff9800; animation: pulse 1s infinite; }
+    #ble-status { flex:1; font-size:13px; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    /* Cards */
+    .card {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    .card-title {
+      font-size: 13px; font-weight: 600; color: #88ccff;
+      text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;
+    }
+
+    /* Buttons */
+    button {
+      padding: 10px 18px; border: none; border-radius: 8px;
+      cursor: pointer; font-size: 14px; font-weight: 600;
+      transition: transform 0.1s, opacity 0.2s; margin: 4px;
+    }
+    button:active  { transform: scale(0.96); }
+    button:disabled { opacity: 0.35; cursor: default; }
+
+    .btn-primary { background: #0070f3; color: #fff; }
+    .btn-success { background: #22c55e; color: #fff; }
+    .btn-danger  { background: #ef4444; color: #fff; }
+    .btn-ghost   { background: rgba(255,255,255,0.12); color: #e0e0e0; }
+
+    .btn-vol { min-width: 54px; background: rgba(100,150,255,0.2);
+               color:#aad4ff; border: 1px solid rgba(100,150,255,0.35); }
+    .btn-vol.active { background:#0070f3; color:#fff; }
+
+    .vol-row  { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    #vol-label { color:#aaa; font-size:13px; margin-left:4px; }
+
+    .play-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    #play-status { color:#aaa; font-size:13px; }
+
+    .rgb-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+    input[type=color] {
+      width:40px; height:36px; border:none; border-radius:6px;
+      cursor:pointer; padding:2px; background:transparent;
+    }
+    select {
+      padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.15);
+      background:rgba(255,255,255,0.1); color:#e0e0e0; font-size:13px; cursor:pointer;
+    }
+
+    /* Track list */
+    .track-type-row { display:flex; gap:8px; margin-bottom:10px; }
+    .track-type-btn {
+      flex:1; background:rgba(255,255,255,0.1); color:#ccc;
+      border:1px solid rgba(255,255,255,0.2); border-radius:8px;
+      padding:8px; font-size:13px; text-align:center; cursor:pointer;
+    }
+    .track-type-btn.active { background:#0070f3; color:#fff; border-color:#0070f3; }
+
+    #file-list { margin-top:8px; max-height:220px; overflow-y:auto; }
+    .file-item {
+      display:flex; align-items:center; justify-content:space-between;
+      background:rgba(255,255,255,0.05); border-radius:8px;
+      padding:8px 10px; margin-bottom:6px;
+    }
+    .file-name { font-size:13px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .file-btns { display:flex; gap:4px; flex-shrink:0; }
+    .file-btns button { padding:5px 10px; font-size:12px; margin:0; }
+
+    /* WiFi section */
+    #wifi-section { border-color: rgba(100,200,100,0.3); }
+    input[type=text], input[type=password] {
+      display:block; width:100%; padding:10px 12px; margin-bottom:8px;
+      font-size:14px; border:1px solid rgba(255,255,255,0.15);
+      border-radius:8px; background:rgba(255,255,255,0.08); color:#e0e0e0;
+    }
+    input[type=text]::placeholder,
+    input[type=password]::placeholder { color:#666; }
+    input[type=text]:focus,
+    input[type=password]:focus { outline:none; border-color:#0070f3; }
+
+    /* WiFi mode dims BLE-only controls */
+    body.wifi-mode .ble-only { opacity:0.3; pointer-events:none; }
+
+    /* Upload section only visible in WiFi mode */
+    #upload-section { display:none; }
+    body.wifi-mode #upload-section { display:block; }
+    body.wifi-mode #wifi-connect-form { display:none; }
+
+    input[type=file] {
+      display:block; width:100%; padding:8px;
+      font-size:13px; border:1px dashed rgba(255,255,255,0.25);
+      border-radius:8px; background:rgba(255,255,255,0.05); color:#ccc;
+      margin-bottom:8px; cursor:pointer;
+    }
+    .upload-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .upload-row select, .upload-row input[type=number] { flex:1; min-width:80px; }
+    input[type=number] {
+      padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.15);
+      background:rgba(255,255,255,0.1); color:#e0e0e0; font-size:13px; width:70px;
+    }
+
+    /* Progress bar */
+    #upload-progress-bg { background:rgba(255,255,255,0.1); border-radius:3px; margin:8px 0; }
+    #upload-progress-bar {
+      width:0%; height:6px; background:#0070f3;
+      border-radius:3px; transition:width 0.2s;
+    }
+
+    /* IP override row */
+    .ip-row {
+      display:flex; gap:8px; align-items:center; margin-bottom:10px;
+    }
+    .ip-row input {
+      flex:1; display:inline; margin:0; padding:8px 10px; font-size:13px;
+    }
+    .ip-row button { flex-shrink:0; margin:0; padding:8px 14px; font-size:13px; }
+
+    /* Toast */
+    #toast {
+      position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+      background:#222; color:#fff; padding:10px 20px; border-radius:20px;
+      font-size:13px; opacity:0; transition:opacity 0.3s;
+      max-width:90vw; text-align:center; z-index:999;
+      border: 1px solid rgba(255,255,255,0.15); pointer-events:none;
+    }
+    #toast.show { opacity:1; }
+    #toast.ok   { border-color:#4caf50; }
+    #toast.err  { border-color:#ef4444; }
+
+    .note { font-size:11px; color:#666; margin-top:8px; line-height:1.5; }
+
+    ::-webkit-scrollbar { width:4px; }
+    ::-webkit-scrollbar-track { background:transparent; }
+    ::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.2); border-radius:2px; }
+  </style>
+</head>
+<body>
+
+<h1>🎵 Music Toy</h1>
+<p class="subtitle">ESP32-S3 BLE Controller</p>
+
+<!-- BLE connection bar -->
+<div id="ble-bar">
+  <div id="ble-dot"></div>
+  <span id="ble-status">Not connected — tap Connect</span>
+  <button class="btn-primary" id="btn-connect" onclick="bleConnect()" style="padding:7px 14px;font-size:13px;">Connect</button>
+</div>
+
+<!-- VOLUME -->
+<div class="card ble-only">
+  <div class="card-title">🔊 Volume</div>
+  <div class="vol-row">
+    <button class="btn-vol" id="vol-1" onclick="setVolume(1)">1</button>
+    <button class="btn-vol" id="vol-3" onclick="setVolume(3)">3</button>
+    <button class="btn-vol" id="vol-5" onclick="setVolume(5)">5</button>
+    <span id="vol-label">Current: 3</span>
+  </div>
+</div>
+
+<!-- PLAYBACK -->
+<div class="card ble-only">
+  <div class="card-title">⏯️ Playback</div>
+  <div class="play-row">
+    <button class="btn-ghost" onclick="sendCmd({cmd:'pause'})">⏯️ Pause / Play</button>
+    <span id="play-status">—</span>
+  </div>
+</div>
+
+<!-- TRACKS (BLE list) -->
+<div class="card ble-only">
+  <div class="card-title">🎵 Tracks</div>
+  <div class="track-type-row">
+    <div class="track-type-btn active" id="tt-stories" onclick="switchTrackType('stories')">Stories</div>
+    <div class="track-type-btn"        id="tt-tunes"   onclick="switchTrackType('tunes')">Tunes</div>
+  </div>
+  <button class="btn-ghost" onclick="listFiles()" style="width:100%;margin:0 0 8px 0;">🔄 Refresh List</button>
+  <div id="file-list"><p style="color:#666;font-size:13px;text-align:center;">Connect to load files</p></div>
+</div>
+
+<!-- RGB -->
+<div class="card ble-only">
+  <div class="card-title">💡 RGB LED</div>
+  <div class="rgb-row">
+    <button class="btn-ghost"   onclick="sendCmd({cmd:'rgb',action:'toggle'})">Toggle</button>
+    <button class="btn-success" onclick="sendCmd({cmd:'rgb',action:'on'})">ON</button>
+    <button class="btn-danger"  onclick="sendCmd({cmd:'rgb',action:'off'})">OFF</button>
+  </div>
+  <div class="rgb-row">
+    <label style="font-size:13px;color:#aaa;">Mode:</label>
+    <select onchange="sendCmd({cmd:'rgb',action:'mode',value:parseInt(this.value)})">
+      <option value="0">Cycle Colors</option>
+      <option value="1">Static</option>
+      <option value="2">Breathing</option>
+    </select>
+    <label style="font-size:13px;color:#aaa;">Color:</label>
+    <input type="color" id="rgb-color" value="#ff0000" onchange="sendRgbColor()">
+  </div>
+</div>
+
+<!-- WIFI UPLOAD MODE -->
+<div class="card" id="wifi-section">
+  <div class="card-title">📶 WiFi Upload Mode</div>
+
+  <!-- Connect form — hidden once WiFi is active -->
+  <div id="wifi-connect-form">
+    <p style="font-size:13px;color:#aaa;margin-bottom:10px;">
+      Enter your WiFi credentials. The ESP32 will connect and start an upload server.
+    </p>
+    <input type="text"     id="wifi-ssid"     placeholder="WiFi SSID">
+    <input type="password" id="wifi-password" placeholder="WiFi Password">
+    <button class="btn-success" id="btn-wifi-connect" onclick="startWifi()"
+            style="width:100%;margin:0;" disabled>
+      📶 Connect to WiFi &amp; Enable Upload
+    </button>
+    <div id="wifi-status" style="margin-top:8px;font-size:13px;color:#aaa;"></div>
+  </div>
+
+  <!-- Upload UI — shown once WiFi is active -->
+  <div id="upload-section">
+    <p style="font-size:13px;color:#4caf50;margin-bottom:8px;">
+      ✅ WiFi connected — server at <strong id="wifi-ip">—</strong>
+    </p>
+
+    <!-- ── IP OVERRIDE — use this if the auto-detected IP fails ── -->
+    <div class="ip-row">
+      <input type="text" id="ip-override" placeholder="Override IP if needed (e.g. 10.125.83.27)" style="font-size:12px;">
+      <button class="btn-ghost" onclick="applyIpOverride()" style="font-size:12px;">Apply</button>
+    </div>
+
+    <div class="card-title" style="margin-bottom:8px;">📤 Upload MP3</div>
+    <input type="file" id="upload-file" accept=".mp3">
+    <div class="upload-row" style="margin-bottom:8px;">
+      <select id="upload-type">
+        <option value="stories">Stories</option>
+        <option value="tunes">Tunes</option>
+      </select>
+      <label style="font-size:13px;color:#aaa;">Track:</label>
+      <input type="number" id="upload-track" min="1" max="5" value="1">
+      <button class="btn-primary" onclick="uploadFile()" style="flex:1;">Upload</button>
+    </div>
+    <div id="upload-progress-bg">
+      <div id="upload-progress-bar"></div>
+    </div>
+    <div id="upload-result" style="font-size:13px;color:#aaa;margin-top:6px;min-height:18px;"></div>
+
+    <hr style="border-color:rgba(255,255,255,0.1);margin:14px 0;">
+
+    <div class="card-title" style="margin-bottom:8px;">📁 Files (via WiFi)</div>
+    <div class="track-type-row">
+      <div class="track-type-btn active" id="wtt-stories" onclick="wifiSwitchType('stories')">Stories</div>
+      <div class="track-type-btn"        id="wtt-tunes"   onclick="wifiSwitchType('tunes')">Tunes</div>
+    </div>
+    <button class="btn-ghost" onclick="wifiListFiles()" style="width:100%;margin:0 0 8px 0;">🔄 Refresh</button>
+    <div id="wifi-file-list"></div>
+
+    <hr style="border-color:rgba(255,255,255,0.1);margin:14px 0;">
+    <button class="btn-danger" onclick="exitWifi()" style="width:100%;margin:0;">
+      🔌 Exit WiFi Mode
+    </button>
+    <p class="note">⚠️ BLE controls are paused in WiFi mode. Tap Exit first to resume.</p>
+  </div>
+</div>
+
+<p class="note" style="text-align:center;padding-bottom:20px;">
+  ⚠️ Requires Chrome on Android or desktop
+</p>
+
+<div id="toast"></div>
+
+<script>
+/* ── BLE UUIDs ── */
+const SERVICE_UUID  = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const CMD_CHAR_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+const NTF_CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
+/* ── State ── */
+let cmdChar          = null;
+let notifyChar       = null;
+let bleConnected     = false;
+let currentTrackType = 'stories';
+let wifiCurrentType  = 'stories';
+let wifiServerIp     = null;
+let inWifiMode       = false;
+
+/* ── Toast ── */
+let toastTimer = null;
+function toast(msg, type='info', ms=3000) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className   = 'show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ''; }, ms);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  XHR HELPER — used for ALL WiFi HTTP calls.
+ *
+ *  REASON: When this HTML file is opened as content:// on Android, the page
+ *  origin is "null". Chrome blocks fetch() to http:// from a null origin
+ *  (mixed-content policy). XMLHttpRequest with .open() + .send() bypasses
+ *  this restriction and works correctly from file:// / content:// origins.
+ * ══════════════════════════════════════════════════════════════════════════*/
+function xhrRequest(method, url, body, contentType, onSuccess, onError, onProgress) {
+  const xhr = new XMLHttpRequest();
+  xhr.open(method, url);
+  xhr.timeout = 120000;
+  if (contentType) xhr.setRequestHeader('Content-Type', contentType);
+
+  if (onProgress && xhr.upload) {
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded, e.total);
+    };
+  }
+
+  xhr.onload = () => {
+    if (xhr.status >= 200 && xhr.status < 300) {
+      onSuccess(xhr.responseText);
+    } else {
+      onError('HTTP ' + xhr.status + ': ' + xhr.responseText);
+    }
+  };
+
+  // xhr.onerror   = () => onError('Network error — check phone & ESP32 on same WiFi');
+  xhr.onerror = (e) => {
+    console.error("XHR ERROR:", e);
+    onError('Network error — request not reaching ESP32');
+  };
+  xhr.ontimeout = () => onError('Request timed out');
+
+  xhr.send(body || null);
+  return xhr;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  BLE CONNECT
+ * ══════════════════════════════════════════════════════════════════════════*/
+async function bleConnect() {
+  if (!navigator.bluetooth) {
+    toast('❌ Web Bluetooth not supported — use Chrome', 'err', 5000);
+    return;
+  }
+  setBleStatus('connecting', 'Scanning…');
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SERVICE_UUID] }]
+    });
+
+    setBleStatus('connecting', `Connecting to ${device.name || 'device'}…`);
+    device.addEventListener('gattserverdisconnected', onBleDisconnect);
+
+    const server  = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    cmdChar       = await service.getCharacteristic(CMD_CHAR_UUID);
+    notifyChar    = await service.getCharacteristic(NTF_CHAR_UUID);
+
+    await notifyChar.startNotifications();
+    notifyChar.addEventListener('characteristicvaluechanged', onBleNotify);
+
+    bleConnected = true;
+    setBleStatus('connected', `Connected: ${device.name || 'ESP32S3_BLE'}`);
+    document.getElementById('btn-connect').textContent = 'Connected';
+    document.getElementById('btn-connect').disabled = true;
+    document.getElementById('btn-wifi-connect').disabled = false;
+
+    listFiles();
+
+  } catch (err) {
+    setBleStatus('', 'Disconnected');
+    toast('❌ ' + (err.name === 'NotFoundError' ? 'No device found' : err.message), 'err');
+    console.error(err);
+  }
+}
+
+function onBleDisconnect() {
+  bleConnected = false;
+  cmdChar = notifyChar = null;
+  setBleStatus('', 'Disconnected — tap Connect');
+  document.getElementById('btn-connect').textContent = 'Connect';
+  document.getElementById('btn-connect').disabled = false;
+  document.getElementById('btn-wifi-connect').disabled = true;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  BLE SEND
+ * ══════════════════════════════════════════════════════════════════════════*/
+async function sendCmd(obj) {
+  if (!bleConnected || !cmdChar) { toast('⚠️ Not connected to BLE', 'err'); return; }
+  try {
+    const data = new TextEncoder().encode(JSON.stringify(obj));
+    await cmdChar.writeValueWithoutResponse(data);
+  } catch (err) {
+    toast('❌ BLE send failed: ' + err.message, 'err');
+    console.error(err);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  BLE NOTIFY HANDLER
+ * ══════════════════════════════════════════════════════════════════════════*/
+function onBleNotify(event) {
+  const text = new TextDecoder().decode(new Uint8Array(event.target.value.buffer));
+  let msg;
+  try { msg = JSON.parse(text); } catch { return; }
+  console.log('BLE notify:', msg);
+
+  switch (msg.event) {
+    case 'volume':
+      document.getElementById('vol-label').textContent = 'Current: ' + msg.value;
+      document.querySelectorAll('.btn-vol').forEach(b => b.classList.remove('active'));
+      const vb = document.getElementById('vol-' + msg.value);
+      if (vb) vb.classList.add('active');
+      toast('Volume → ' + msg.value, 'ok');
+      break;
+
+    case 'paused':
+      document.getElementById('play-status').textContent = '⏸ Paused';
+      toast('Paused', 'ok');
+      break;
+
+    case 'playing':
+      document.getElementById('play-status').textContent =
+        '▶ Playing' + (msg.file ? ': ' + msg.file : '');
+      toast('▶ ' + (msg.file || 'Playing'), 'ok');
+      break;
+
+    case 'deleted':
+      toast('🗑 Deleted: ' + msg.file, 'ok');
+      listFiles();
+      if (inWifiMode) wifiListFiles();
+      break;
+
+    case 'files':
+      renderFileList(msg.type, msg.list || []);
+      break;
+
+    case 'rgb':
+      if (msg.state !== undefined) toast('RGB ' + msg.state.toUpperCase(), 'ok');
+      if (msg.mode  !== undefined) toast('RGB Mode: ' + msg.mode, 'ok');
+      if (msg.r     !== undefined) toast(`RGB: rgb(${msg.r},${msg.g},${msg.b})`, 'ok');
+      break;
+
+    case 'wifi_connected':
+      wifiServerIp = msg.ip;
+      document.getElementById('wifi-ip').textContent = msg.ip;
+      document.getElementById('ip-override').placeholder = 'Override IP if needed (e.g. ' + msg.ip + ')';
+      enterWifiMode();
+      toast('✅ WiFi connected — ' + msg.ip, 'ok', 5000);
+      break;
+
+    case 'wifi_failed':
+      document.getElementById('wifi-status').textContent =
+        '❌ WiFi failed: ' + (msg.reason || 'unknown');
+      toast('❌ WiFi failed: ' + msg.reason, 'err', 5000);
+      break;
+
+    case 'wifi_disconnected':
+      exitWifiModeUI();
+      toast('WiFi off — BLE mode', 'ok');
+      break;
+
+    case 'upload_done':
+      setUploadResult('✅ Upload done: ' + msg.type + ' track ' + msg.track, '#4caf50');
+      wifiListFiles();
+      break;
+
+    case 'error':
+      toast('❌ ' + msg.msg, 'err');
+      break;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  VOLUME / RGB
+ * ══════════════════════════════════════════════════════════════════════════*/
+function setVolume(v) { sendCmd({ cmd:'volume', value:v }); }
+
+function sendRgbColor() {
+  const hex = document.getElementById('rgb-color').value;
+  sendCmd({
+    cmd:'rgb', action:'color',
+    r: parseInt(hex.substr(1,2),16),
+    g: parseInt(hex.substr(3,2),16),
+    b: parseInt(hex.substr(5,2),16)
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  BLE FILE LIST
+ * ══════════════════════════════════════════════════════════════════════════*/
+function switchTrackType(type) {
+  currentTrackType = type;
+  document.getElementById('tt-stories').classList.toggle('active', type === 'stories');
+  document.getElementById('tt-tunes').classList.toggle('active',   type === 'tunes');
+  listFiles();
+}
+
+function listFiles() {
+  if (!bleConnected) return;
+  sendCmd({ cmd:'list', type:currentTrackType });
+}
+
+function renderFileList(type, files) {
+  const el = document.getElementById('file-list');
+  if (type !== currentTrackType) return;
+  if (files.length === 0) {
+    el.innerHTML = '<p style="color:#666;font-size:13px;text-align:center;">No files found</p>';
+    return;
+  }
+  el.innerHTML = files.map(f => `
+    <div class="file-item">
+      <span class="file-name">🎵 ${f}</span>
+      <div class="file-btns">
+        <button class="btn-success" onclick="playBle('${type}','${f}')">▶</button>
+        <button class="btn-danger"  onclick="deleteBle('${type}','${f}')">🗑</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function playBle(type, file)   { sendCmd({ cmd:'play',   type, file }); }
+function deleteBle(type, file) {
+  if (!confirm('Delete ' + file + '?')) return;
+  sendCmd({ cmd:'delete', type, file });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  IP OVERRIDE — allows user to manually fix IP if BLE-received one is wrong
+ * ══════════════════════════════════════════════════════════════════════════*/
+function applyIpOverride() {
+  const val = document.getElementById('ip-override').value.trim();
+  if (!val) { toast('⚠️ Enter an IP address first', 'err'); return; }
+  wifiServerIp = val;
+  document.getElementById('wifi-ip').textContent = val;
+  toast('✅ IP set to ' + val, 'ok');
+  wifiListFiles();
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  WIFI — CONNECT / DISCONNECT
+ * ══════════════════════════════════════════════════════════════════════════*/
+function startWifi() {
+  const ssid     = document.getElementById('wifi-ssid').value.trim();
+  const password = document.getElementById('wifi-password').value;
+  if (!ssid) { toast('⚠️ Enter SSID', 'err'); return; }
+  document.getElementById('wifi-status').textContent = '⏳ Connecting…';
+  sendCmd({ cmd:'wifi_connect', ssid, password });
+}
+
+function enterWifiMode() {
+  inWifiMode = true;
+  document.body.classList.add('wifi-mode');
+  document.getElementById('upload-progress-bar').style.width = '0%';
+  wifiListFiles();
+}
+
+function exitWifiModeUI() {
+  inWifiMode   = false;
+  wifiServerIp = null;
+  document.body.classList.remove('wifi-mode');
+  document.getElementById('wifi-status').textContent    = '';
+  document.getElementById('wifi-ssid').value            = '';
+  document.getElementById('wifi-password').value        = '';
+  document.getElementById('wifi-file-list').innerHTML   = '';
+  document.getElementById('upload-result').textContent  = '';
+  document.getElementById('upload-progress-bar').style.width = '0%';
+  document.getElementById('ip-override').value          = '';
+}
+
+function exitWifi() {
+  sendCmd({ cmd:'wifi_exit' });
+  exitWifiModeUI();
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  FILE UPLOAD — raw binary POST via XHR
+ *
+ *  WHY XHR not fetch():
+ *    This HTML is opened as content:// on Android (null origin).
+ *    Chrome blocks fetch() to http:// from a null origin (mixed content).
+ *    XHR does NOT have this restriction and works correctly.
+ *
+ *  WHY raw binary not FormData:
+ *    ESP32's upload_raw_handler reads req->content_len raw bytes.
+ *    FormData/multipart wraps the file in boundary garbage and corrupts it.
+ *    We send the raw File object directly — Content-Length is set by browser.
+ * ══════════════════════════════════════════════════════════════════════════*/
+function uploadFile() {
+  if (!wifiServerIp) { toast('⚠️ Not in WiFi mode', 'err'); return; }
+
+  const fileInput = document.getElementById('upload-file');
+  const file      = fileInput.files[0];
+  const type      = document.getElementById('upload-type').value;
+  const track     = parseInt(document.getElementById('upload-track').value);
+
+  if (!file)               { toast('⚠️ Select an MP3 file first', 'err'); return; }
+  if (track < 1 || track > 5) { toast('⚠️ Track must be 1–5', 'err'); return; }
+
+  setUploadResult('⏳ Uploading ' + file.name + ' (' + Math.round(file.size/1024) + ' KB)…', '#aaa');
+  const bar = document.getElementById('upload-progress-bar');
+  bar.style.width = '0%';
+
+  const url = `http://${wifiServerIp}/upload_raw?type=${type}&track=${track}`;
+  console.log("UPLOAD URL:", url);
+  console.log("Sending file:", file.name, file.size);
+
+  xhrRequest(
+    'POST', url, file, 'application/octet-stream',
+    (resp) => {
+      bar.style.width = '100%';
+      setUploadResult(`✅ Uploaded → ${type}/track${track}.mp3`, '#4caf50');
+      toast('✅ Upload complete!', 'ok');
+      wifiListFiles();
+    },
+    (err) => {
+      setUploadResult('❌ ' + err, '#ef4444');
+      toast('❌ Upload failed', 'err');
+    },
+    (loaded, total) => {
+      bar.style.width = Math.round(loaded / total * 100) + '%';
+    }
+  );
+}
+
+function setUploadResult(msg, color) {
+  const el = document.getElementById('upload-result');
+  el.textContent = msg;
+  el.style.color = color;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  WIFI FILE LIST / DELETE — all via XHR (not fetch)
+ * ══════════════════════════════════════════════════════════════════════════*/
+function wifiSwitchType(type) {
+  wifiCurrentType = type;
+  document.getElementById('wtt-stories').classList.toggle('active', type === 'stories');
+  document.getElementById('wtt-tunes').classList.toggle('active',   type === 'tunes');
+  wifiListFiles();
+}
+
+function wifiListFiles() {
+  if (!wifiServerIp) return;
+  const url = `http://${wifiServerIp}/list?type=${wifiCurrentType}`;
+  const el  = document.getElementById('wifi-file-list');
+  el.innerHTML = '<p style="color:#aaa;font-size:13px;">Loading…</p>';
+
+  xhrRequest('GET', url, null, null,
+    (resp) => {
+      try {
+        const files = JSON.parse(resp);
+        renderWifiFileList(wifiCurrentType, files);
+      } catch(e) {
+        el.innerHTML = '<p style="color:#ef4444;font-size:13px;">Parse error: ' + e.message + '</p>';
+      }
+    },
+    (err) => {
+      el.innerHTML = '<p style="color:#ef4444;font-size:13px;">Error loading files: ' + err + '</p>';
+    }
+  );
+}
+
+function renderWifiFileList(type, files) {
+  const el = document.getElementById('wifi-file-list');
+  if (files.length === 0) {
+    el.innerHTML = '<p style="color:#666;font-size:13px;text-align:center;">No files</p>';
+    return;
+  }
+  el.innerHTML = files.map(f => `
+    <div class="file-item">
+      <span class="file-name">🎵 ${f}</span>
+      <div class="file-btns">
+        <button class="btn-success" onclick="playBle('${type}','${f}')">▶</button>
+        <button class="btn-danger"  onclick="wifiDelete('${type}','${f}')">🗑</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function wifiDelete(type, file) {
+  if (!confirm('Delete ' + file + '?')) return;
+  if (!wifiServerIp) return;
+  const url = `http://${wifiServerIp}/delete?type=${type}&file=${encodeURIComponent(file)}`;
+
+  xhrRequest('DELETE', url, null, null,
+    (resp) => {
+      toast('🗑 Deleted: ' + file, 'ok');
+      wifiListFiles();
+    },
+    (err) => {
+      toast('❌ Delete failed: ' + err, 'err');
+    }
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  UTILITIES
+ * ══════════════════════════════════════════════════════════════════════════*/
+function setBleStatus(state, text) {
+  document.getElementById('ble-dot').className = state;
+  document.getElementById('ble-status').textContent = text;
+}
+</script>
+</body>
+</html>
